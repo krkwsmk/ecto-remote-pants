@@ -39,7 +39,7 @@ enum ConnectionPhase: Equatable {
 
 /// Central controller. All `@Published` mutations happen on the main thread:
 /// UI-initiated calls are already on main, and output arriving on background
-/// pipe threads is funnelled back through `Task { @MainActor in … }`.
+/// pipe threads is funnelled back through `DispatchQueue.main.async`.
 final class AppModel: ObservableObject {
     static let shared = AppModel()
 
@@ -204,20 +204,20 @@ final class AppModel: ObservableObject {
         outPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if data.isEmpty { handle.readabilityHandler = nil; return }
-            if let text = String(data: data, encoding: .utf8) {
-                Task { @MainActor in self?.handleSSHText(text) }
-            }
+            guard let self, let text = String(data: data, encoding: .utf8) else { return }
+            DispatchQueue.main.async { self.handleSSHText(text) }
         }
         errPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if data.isEmpty { handle.readabilityHandler = nil; return }
-            if let text = String(data: data, encoding: .utf8) {
-                Task { @MainActor in self?.handleSSHText(text) }
-            }
+            guard let self, let text = String(data: data, encoding: .utf8) else { return }
+            DispatchQueue.main.async { self.handleSSHText(text) }
         }
 
         process.terminationHandler = { [weak self] proc in
-            Task { @MainActor in self?.sshDidExit(status: proc.terminationStatus) }
+            let status = proc.terminationStatus
+            guard let self else { return }
+            DispatchQueue.main.async { self.sshDidExit(status: status) }
         }
 
         do {
@@ -325,19 +325,21 @@ final class AppModel: ObservableObject {
         outPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if data.isEmpty { handle.readabilityHandler = nil; return }
-            Task { @MainActor in self?.handlePayload(data) }
+            guard let self else { return }
+            DispatchQueue.main.async { self.handlePayload(data) }
         }
         // stderr = ncat control chatter (incl. "Connection from")
         errPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if data.isEmpty { handle.readabilityHandler = nil; return }
-            if let text = String(data: data, encoding: .utf8) {
-                Task { @MainActor in self?.handleListenerControl(text) }
-            }
+            guard let self, let text = String(data: data, encoding: .utf8) else { return }
+            DispatchQueue.main.async { self.handleListenerControl(text) }
         }
 
         process.terminationHandler = { [weak self] proc in
-            Task { @MainActor in self?.listenerDidExit(status: proc.terminationStatus) }
+            let status = proc.terminationStatus
+            guard let self else { return }
+            DispatchQueue.main.async { self.listenerDidExit(status: status) }
         }
 
         do {
