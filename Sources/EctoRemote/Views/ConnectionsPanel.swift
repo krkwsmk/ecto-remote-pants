@@ -4,9 +4,9 @@ struct ConnectionsPanel: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        NeonPanel(accent: Theme.neonMagenta, title: "Connections (\(model.connections.count))") {
+        NeonPanel(accent: Theme.neonMagenta, title: "Соединения (\(model.connections.count))") {
             if model.connections.isEmpty {
-                Text("No inbound connections yet.")
+                Text("Пока нет входящих соединений с данными.")
                     .font(Theme.monoSmall)
                     .foregroundStyle(Theme.textDim)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -18,7 +18,7 @@ struct ConnectionsPanel: View {
                         }
                     }
                 }
-                .frame(maxHeight: 180)
+                .frame(maxHeight: 200)
             }
         }
     }
@@ -30,36 +30,48 @@ struct ConnectionRow: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Text(String(format: "#%03d", index))
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
                 .foregroundStyle(Theme.neonMagenta)
-            VStack(alignment: .leading, spacing: 1) {
+
+            VStack(alignment: .leading, spacing: 2) {
                 Text(conn.peer)
-                    .font(Theme.monoSmall)
-                    .foregroundStyle(Theme.textPrimary)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Theme.neonCyan)
                     .lineLimit(1)
-                Text("\(conn.bytes) B · \(conn.startedString)")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(Theme.textDim)
+                    .truncationMode(.middle)
+                Text("\(conn.bytes) B  ·  \(conn.startedString)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.85))
                     .lineLimit(1)
             }
-            Spacer()
+
+            Spacer(minLength: 6)
+
             Button {
                 model.revealConnection(conn)
             } label: {
-                Image(systemName: "doc.text.magnifyingglass")
+                Text("ОТКРЫТЬ")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5)
+                            .stroke(Theme.neonCyan.opacity(0.7), lineWidth: 1)
+                    )
                     .foregroundStyle(Theme.neonCyan)
             }
             .buttonStyle(.plain)
-            .help("Reveal log file in Finder")
+            .help("Показать файл лога в Finder")
         }
-        .padding(8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
         .background(
-            RoundedRectangle(cornerRadius: 6).fill(Theme.bg)
+            RoundedRectangle(cornerRadius: 7).fill(Theme.panelRaised)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 6).stroke(Theme.stroke, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 7).stroke(Theme.stroke, lineWidth: 1)
         )
     }
 }
