@@ -16,6 +16,7 @@ final class AppSettings {
         static let lastPort = "last.port"
         static let keychainAccount = "keychain.account"
         static let autoStartListener = "auto.startListener"
+        static let lineEnding = "cmd.lineEnding"
     }
 
     /// Account name used to scope the saved password. Derived from user@host
@@ -55,6 +56,12 @@ final class AppSettings {
     var autoStartListener: Bool {
         get { defaults.object(forKey: Key.autoStartListener) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.autoStartListener) }
+    }
+
+    /// Line terminator appended to sent commands and Enter: "lf", "cr", "crlf".
+    var lineEnding: String {
+        get { defaults.string(forKey: Key.lineEnding) ?? "lf" }
+        set { defaults.set(newValue, forKey: Key.lineEnding) }
     }
 
     // Password is stored in the app's own preferences (not the macOS Keychain).
