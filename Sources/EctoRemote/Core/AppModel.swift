@@ -11,11 +11,11 @@ enum ConnectionPhase: Equatable {
 
     var label: String {
         switch self {
-        case .idle: return "OFFLINE"
-        case .startingTunnel: return "LINKING…"
-        case .tunnelUp: return "TUNNEL UP"
-        case .listening: return "LISTENING"
-        case .failed: return "FAULT"
+        case .idle: return "ОФФЛАЙН"
+        case .startingTunnel: return "ПОДКЛЮЧЕНИЕ…"
+        case .tunnelUp: return "ТУННЕЛЬ ОК"
+        case .listening: return "СЛУШАЮ"
+        case .failed: return "ОШИБКА"
         }
     }
 
@@ -61,16 +61,28 @@ final class AppModel: ObservableObject {
     @Published private(set) var connections: [ConnectionRecord] = []
     @Published private(set) var totalBytes: Int = 0
     @Published var autoScroll: Bool = true
+    @Published var commandInput: String = ""
+
+    /// Whether a command can be sent to the connected device right now.
+    var canSend: Bool { phase == .listening && ncatStdin != nil }
+
+    /// Whether a relay password has been configured (in Settings).
+    var hasRelayPassword: Bool { !password.isEmpty }
 
     // Processes
     private var sshProcess: Process?
     private var ncatProcess: Process?
+    private var ncatStdin: FileHandle?
 
     // Buffers for line assembly
     private var controlBuffer = ""          // ssh stderr/stdout
     private var listenerControlBuffer = ""  // ncat stderr
-    private var dataBuffer = ""             // ncat stdout payload
     private var sawAuthenticated = false
+
+    // A connection entry + log file is created lazily on the first data byte,
+    // so empty probe connections (0 B) don't flood the list.
+    private var pendingPeer: String?
+    private var currentConnectionOpen = false
 
     private let logFiles = LogFiles()
     private let maxLines = 6000
@@ -85,7 +97,7 @@ final class AppModel: ObservableObject {
         guard !phase.isActive else { return }
         let trimmedPort = port.trimmingCharacters(in: .whitespaces)
         guard let portNum = Int(trimmedPort), (1...65535).contains(portNum) else {
-            appendLine(.error, "Invalid port. Enter a number between 1 and 65535.")
+            appendLine(.error, "Неверный порт. Введите число от 1 до 65535.")
             return
         }
         activePort = trimmedPort
@@ -97,17 +109,18 @@ final class AppModel: ObservableObject {
         totalBytes = 0
         controlBuffer = ""
         listenerControlBuffer = ""
-        dataBuffer = ""
         sawAuthenticated = false
+        pendingPeer = nil
+        currentConnectionOpen = false
 
         let dir = logFiles.startSession(port: trimmedPort)
-        appendLine(.info, "Session log: \(dir.path)")
+        appendLine(.info, "Лог сессии: \(dir.path)")
 
         startTunnel(port: trimmedPort)
     }
 
     func disconnect() {
-        appendLine(.info, "Shutting down…")
+        appendLine(.info, "Отключение…")
         terminateProcesses()
         logFiles.appendSession("[\(now())] SYS session closed")
         logFiles.closeSession()
@@ -124,6 +137,26 @@ final class AppModel: ObservableObject {
 
     func clearScreen() {
         lines.removeAll()
+    }
+
+    /// Send the typed command to the connected device via the listener's stdin.
+    func sendCommand() {
+        let cmd = commandInput
+        guard !cmd.isEmpty else { return }
+        guard let handle = ncatStdin, phase == .listening else {
+            appendLine(.error, "Нет активного слушателя — команду отправить некуда.")
+            return
+        }
+        guard let data = (cmd + "\n").data(using: .utf8) else { return }
+        do {
+            try handle.write(contentsOf: data)
+        } catch {
+            appendLine(.error, "Не удалось отправить команду: \(error.localizedDescription)")
+            return
+        }
+        appendLine(.sent, cmd)
+        logFiles.appendSession("[\(now())] TX \(cmd)")
+        commandInput = ""
     }
 
     func persistSettings() {
@@ -152,7 +185,7 @@ final class AppModel: ObservableObject {
         phase = .startingTunnel
 
         guard let sshPath = ToolLocator.find("ssh") else {
-            fail("ssh binary not found on this system.")
+            fail("Не найден ssh в системе.")
             return
         }
 
@@ -160,7 +193,7 @@ final class AppModel: ObservableObject {
         do {
             askpassPath = try SSHAskpass.ensureScript()
         } catch {
-            fail("Could not prepare credential helper: \(error.localizedDescription)")
+            fail("Не удалось подготовить помощник паролей: \(error.localizedDescription)")
             return
         }
 
@@ -223,7 +256,7 @@ final class AppModel: ObservableObject {
         do {
             try process.run()
             sshProcess = process
-            appendLine(.info, "Establishing reverse tunnel to \(sshUser)@\(sshHost)…")
+            appendLine(.info, "Поднимаю обратный туннель к \(sshUser)@\(sshHost)…")
             // Fallback: if ssh authenticated but we never matched a forward
             // marker (wording varies by version), promote after a short grace.
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
@@ -235,7 +268,7 @@ final class AppModel: ObservableObject {
                 }
             }
         } catch {
-            fail("Failed to launch ssh: \(error.localizedDescription)")
+            fail("Не удалось запустить ssh: \(error.localizedDescription)")
         }
     }
 
@@ -257,14 +290,14 @@ final class AppModel: ObservableObject {
         }
         // Surface common auth failures clearly.
         if text.contains("Permission denied") {
-            appendLine(.error, "Authentication failed. Check the saved password in Settings.")
+            appendLine(.error, "Аутентификация не удалась. Проверьте пароль в Настройках.")
         }
     }
 
     private func tunnelBecameReady() {
         guard phase == .startingTunnel else { return }
         phase = .tunnelUp
-        appendLine(.info, "Reverse tunnel established on port \(activePort).")
+        appendLine(.info, "Обратный туннель поднят на порту \(activePort).")
         logFiles.appendSession("[\(now())] SYS tunnel up on port \(activePort)")
         if autoStartListener {
             startListener(port: activePort)
@@ -276,9 +309,9 @@ final class AppModel: ObservableObject {
         if phase.isActive {
             // Unexpected drop
             if status != 0 && phase == .startingTunnel {
-                fail("ssh exited before the tunnel came up (status \(status)). Check host, credentials, and network.")
+                fail("ssh завершился до поднятия туннеля (код \(status)). Проверьте хост, пароль и сеть.")
             } else {
-                appendLine(.error, "ssh tunnel closed (status \(status)).")
+                appendLine(.error, "ssh-туннель закрыт (код \(status)).")
                 phase = .idle
             }
         }
@@ -289,7 +322,7 @@ final class AppModel: ObservableObject {
 
     func startListener() {
         guard phase == .tunnelUp else {
-            appendLine(.error, "Start the tunnel first.")
+            appendLine(.error, "Сначала поднимите туннель.")
             return
         }
         startListener(port: activePort)
@@ -298,11 +331,11 @@ final class AppModel: ObservableObject {
     private func startListener(port: String) {
         let tokens = ToolLocator.tokenize(ncatTemplate, port: port)
         guard let first = tokens.first else {
-            fail("Listener command is empty. Fix it in Settings.")
+            fail("Команда слушателя пустая. Исправьте в Настройках.")
             return
         }
         guard let binPath = ToolLocator.find(first) else {
-            appendLine(.error, "'\(first)' not found. Install it (e.g. `brew install nmap`) or change the listener command in Settings.")
+            appendLine(.error, "'\(first)' не найден. Установите (напр. `brew install nmap`) или поменяйте команду слушателя в Настройках.")
             return
         }
         let args = Array(tokens.dropFirst())
@@ -314,8 +347,10 @@ final class AppModel: ObservableObject {
 
         let outPipe = Pipe()
         let errPipe = Pipe()
+        let inPipe = Pipe()
         process.standardOutput = outPipe
         process.standardError = errPipe
+        process.standardInput = inPipe
 
         let displayCmd = ([first] + args).joined(separator: " ")
         appendLine(.command, displayCmd)
@@ -345,11 +380,13 @@ final class AppModel: ObservableObject {
         do {
             try process.run()
             ncatProcess = process
+            ncatStdin = inPipe.fileHandleForWriting
+            currentConnectionOpen = false
             phase = .listening
-            appendLine(.info, "Listener active on port \(port). Waiting for data…")
+            appendLine(.info, "Слушатель активен на порту \(port). Жду данные…")
             logFiles.appendSession("[\(now())] SYS listener up on port \(port)")
         } catch {
-            fail("Failed to launch listener: \(error.localizedDescription)")
+            fail("Не удалось запустить слушатель: \(error.localizedDescription)")
         }
     }
 
@@ -362,52 +399,50 @@ final class AppModel: ObservableObject {
             appendLine(.control, line)
             logFiles.appendSession("[\(now())] NET \(line)")
             if let peer = Self.parseConnectionPeer(line) {
-                openConnection(peer: peer)
+                // Defer creating the entry + file until data actually arrives,
+                // so empty probe connections (0 B) don't flood the list.
+                pendingPeer = peer
+                currentConnectionOpen = false
             }
         }
     }
 
     private func handlePayload(_ data: Data) {
         totalBytes += data.count
+        if !currentConnectionOpen {
+            openConnection(peer: pendingPeer ?? "stream")
+            currentConnectionOpen = true
+        }
         if !connections.isEmpty {
             connections[connections.count - 1].bytes += data.count
-        } else {
-            // Payload before an explicit connection notice: open a default one.
-            openConnection(peer: "stream")
-            if !connections.isEmpty {
-                connections[connections.count - 1].bytes += data.count
-            }
         }
         logFiles.appendPayload(data)
 
-        // Render readable text, line-buffered.
+        // Show immediately — split on newlines but never wait for one, so data
+        // without trailing newlines still appears on screen as it arrives.
         let text = String(decoding: data, as: UTF8.self)
-        dataBuffer += text
-        for line in splitBufferedLines(&dataBuffer) {
-            appendLine(.data, sanitizeForDisplay(line))
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let pieces = text.components(separatedBy: "\n")
+        for (i, piece) in pieces.enumerated() {
+            if piece.isEmpty && i == pieces.count - 1 { continue }
+            appendLine(.data, sanitizeForDisplay(piece))
         }
     }
 
     private func openConnection(peer: String) {
-        // Flush any trailing payload text from the previous connection.
-        if !dataBuffer.isEmpty {
-            appendLine(.data, sanitizeForDisplay(dataBuffer))
-            dataBuffer = ""
-        }
         let url = logFiles.beginConnectionFile(peer: peer) ?? logFiles.rootFallback()
         let record = ConnectionRecord(peer: peer, startedAt: Date(), bytes: 0, fileURL: url)
         connections.append(record)
-        appendLine(.info, "New connection #\(connections.count) from \(peer) → \(url.lastPathComponent)")
+        appendLine(.info, "Соединение #\(connections.count): \(peer) → \(url.lastPathComponent)")
     }
 
     private func listenerDidExit(status: Int32) {
-        if !dataBuffer.isEmpty {
-            appendLine(.data, sanitizeForDisplay(dataBuffer))
-            dataBuffer = ""
-        }
-        appendLine(.info, "Listener stopped (status \(status)).")
+        appendLine(.info, "Слушатель остановлен (код \(status)).")
         logFiles.appendSession("[\(now())] SYS listener stopped (status \(status))")
         ncatProcess = nil
+        ncatStdin = nil
+        currentConnectionOpen = false
         if phase == .listening {
             phase = sshProcess != nil ? .tunnelUp : .idle
         }
@@ -420,6 +455,8 @@ final class AppModel: ObservableObject {
         sshProcess?.terminate()
         ncatProcess = nil
         sshProcess = nil
+        ncatStdin = nil
+        currentConnectionOpen = false
     }
 
     private func fail(_ message: String) {
