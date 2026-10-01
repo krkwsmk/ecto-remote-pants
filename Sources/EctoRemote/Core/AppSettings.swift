@@ -1,7 +1,7 @@
 import Foundation
 
-/// Non-secret, persisted configuration. The password lives in the Keychain,
-/// everything else lives in UserDefaults.
+/// Persisted configuration stored in UserDefaults, including the relay
+/// password (base64-encoded; obfuscation, not encryption).
 final class AppSettings {
     static let shared = AppSettings()
 
@@ -18,8 +18,8 @@ final class AppSettings {
         static let autoStartListener = "auto.startListener"
     }
 
-    /// The account name used for the Keychain password entry. It is derived
-    /// from user@host so different relays keep different saved passwords.
+    /// Account name used to scope the saved password. Derived from user@host
+    /// so different relays keep different saved passwords.
     var keychainAccount: String {
         "\(sshUser)@\(sshHost)"
     }
@@ -57,20 +57,31 @@ final class AppSettings {
         set { defaults.set(newValue, forKey: Key.autoStartListener) }
     }
 
-    // Password lives in the Keychain
+    // Password is stored in the app's own preferences (not the macOS Keychain).
+    // The Keychain triggers a login-password prompt on every launch for an
+    // ad-hoc-signed app, so for this internal tool we keep it in UserDefaults,
+    // base64-encoded (obfuscation, not encryption).
+    private func passwordKey() -> String { "pw." + keychainAccount }
+
     func savedPassword() -> String? {
-        Keychain.get(account: keychainAccount)
+        guard let b64 = defaults.string(forKey: passwordKey()),
+              let data = Data(base64Encoded: b64),
+              let value = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return value
     }
 
     func savePassword(_ value: String) {
+        let key = passwordKey()
         if value.isEmpty {
-            Keychain.delete(account: keychainAccount)
+            defaults.removeObject(forKey: key)
         } else {
-            Keychain.set(value, account: keychainAccount)
+            defaults.set(Data(value.utf8).base64EncodedString(), forKey: key)
         }
     }
 
     func hasSavedPassword() -> Bool {
-        Keychain.exists(account: keychainAccount)
+        !(savedPassword() ?? "").isEmpty
     }
 }
