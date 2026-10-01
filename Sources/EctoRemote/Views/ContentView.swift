@@ -3,15 +3,7 @@ import AppKit
 
 struct ContentView: View {
     @EnvironmentObject var model: AppModel
-
-    private func openSettings() {
-        // Works across macOS 13 (showSettingsWindow:) and older (showPreferencesWindow:).
-        if NSApp.responds(to: Selector(("showSettingsWindow:"))) {
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        } else {
-            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-        }
-    }
+    @State private var showingSettings = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,46 +18,75 @@ struct ContentView: View {
         }
         .background(Theme.bg.ignoresSafeArea())
         .onDisappear { model.persistSettings() }
+        .sheet(isPresented: $showingSettings) { settingsSheet }
+    }
+
+    private var settingsSheet: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("НАСТРОЙКИ")
+                    .font(.system(size: 12, weight: .black, design: .monospaced))
+                    .tracking(2)
+                    .foregroundStyle(Theme.neonCyan)
+                Spacer()
+                Button {
+                    model.persistSettings()
+                    showingSettings = false
+                } label: {
+                    Text("ГОТОВО")
+                        .font(.system(size: 12, weight: .heavy, design: .monospaced))
+                        .tracking(1)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Theme.neonGreen.opacity(0.8), lineWidth: 1)
+                        )
+                        .foregroundStyle(Theme.neonGreen)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Theme.panel)
+
+            SettingsView()
+                .environmentObject(model)
+        }
+        .frame(width: 520, height: 624)
+        .background(Theme.bg)
     }
 
     // MARK: - Left column
 
     private var controlColumn: some View {
         VStack(spacing: 14) {
-            NeonPanel(accent: Theme.neonCyan, title: "Link Control") {
+            NeonPanel(accent: Theme.neonCyan, title: "Управление") {
                 VStack(alignment: .leading, spacing: 12) {
-                    fieldLabel("PORT")
-                    NeonTextField(placeholder: "e.g. 9000", text: $model.port, accent: Theme.neonCyan)
+                    fieldLabel("ПОРТ")
+                    NeonTextField(placeholder: "напр. 9000", text: $model.port, accent: Theme.neonCyan)
 
-                    fieldLabel("RELAY PASSWORD")
-                    NeonSecureField(placeholder: "••••••••", text: $model.password)
-
-                    Toggle(isOn: $model.savePasswordEnabled) {
-                        Text("Remember password (Keychain)")
+                    if !model.hasRelayPassword {
+                        Text("Пароль и релей задаются в Настройках.")
                             .font(Theme.monoSmall)
-                            .foregroundStyle(Theme.textDim)
+                            .foregroundStyle(Theme.neonAmber.opacity(0.9))
                     }
-                    .toggleStyle(.switch)
-                    .tint(Theme.neonMagenta)
-
-                    Text("Relay: \(model.sshUser)@\(model.sshHost)")
-                        .font(Theme.monoSmall)
-                        .foregroundStyle(Theme.textDim)
 
                     if model.phase.isActive {
-                        NeonButton(title: "Disconnect", accent: Theme.neonRed,
+                        NeonButton(title: "Отключить", accent: Theme.neonRed,
                                    systemImage: "bolt.slash.fill") {
                             model.disconnect()
                         }
                     } else {
-                        NeonButton(title: "Connect", accent: Theme.neonGreen,
+                        NeonButton(title: "Подключить", accent: Theme.neonGreen,
                                    systemImage: "bolt.fill") {
                             model.connect()
                         }
                     }
 
                     if model.phase == .tunnelUp && !model.autoStartListener {
-                        NeonButton(title: "Start Listener", accent: Theme.neonAmber,
+                        NeonButton(title: "Запустить слушатель", accent: Theme.neonAmber,
                                    systemImage: "dot.radiowaves.left.and.right") {
                             model.startListener()
                         }
@@ -75,18 +96,18 @@ struct ContentView: View {
 
             ConnectionsPanel()
 
-            NeonPanel(accent: Theme.neonPurple, title: "Logs") {
+            NeonPanel(accent: Theme.neonPurple, title: "Логи") {
                 VStack(spacing: 10) {
-                    NeonButton(title: "Open Logs Folder", accent: Theme.neonPurple,
+                    NeonButton(title: "Открыть папку логов", accent: Theme.neonPurple,
                                systemImage: "folder.fill") {
                         model.revealLogsInFinder()
                     }
                     HStack(spacing: 10) {
-                        NeonButton(title: "Settings", accent: Theme.neonCyan,
+                        NeonButton(title: "Настройки", accent: Theme.neonCyan,
                                    systemImage: "gearshape.fill") {
-                            openSettings()
+                            showingSettings = true
                         }
-                        NeonButton(title: "Clear", accent: Theme.textDim,
+                        NeonButton(title: "Очистить", accent: Theme.textDim,
                                    systemImage: "trash") {
                             model.clearScreen()
                         }
@@ -103,22 +124,57 @@ struct ContentView: View {
     private var consoleColumn: some View {
         VStack(spacing: 10) {
             HStack {
-                Text("DATA STREAM")
+                Text("ПОТОК ДАННЫХ")
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
                     .tracking(3)
                     .foregroundStyle(Theme.neonGreen)
                 Spacer()
-                Text("\(model.totalBytes) bytes")
+                Text("\(model.totalBytes) байт")
                     .font(Theme.monoSmall)
                     .foregroundStyle(Theme.textDim)
                 Toggle(isOn: $model.autoScroll) {
-                    Text("auto-scroll").font(Theme.monoSmall)
+                    Text("автопрокрутка").font(Theme.monoSmall)
                 }
                 .toggleStyle(.switch)
                 .tint(Theme.neonGreen)
                 .foregroundStyle(Theme.textDim)
             }
             ConsoleView()
+            commandBar
+        }
+    }
+
+    private var commandBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(model.canSend ? Theme.neonAmber : Theme.textDim)
+            TextField(model.canSend ? "Команда устройству, Enter — отправить" : "Нет активного соединения",
+                      text: $model.commandInput)
+                .textFieldStyle(.plain)
+                .font(Theme.mono)
+                .foregroundStyle(Theme.textPrimary)
+                .disabled(!model.canSend)
+                .onSubmit { model.sendCommand() }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Theme.bg))
+                .overlay(RoundedRectangle(cornerRadius: 8)
+                    .stroke(Theme.neonAmber.opacity(model.canSend ? 0.5 : 0.2), lineWidth: 1))
+            Button { model.sendCommand() } label: {
+                Text("SEND")
+                    .font(.system(size: 12, weight: .heavy, design: .monospaced))
+                    .tracking(1)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 11)
+                    .background(RoundedRectangle(cornerRadius: 8)
+                        .fill(Theme.neonAmber.opacity(model.canSend ? 0.16 : 0.05)))
+                    .overlay(RoundedRectangle(cornerRadius: 8)
+                        .stroke(Theme.neonAmber.opacity(model.canSend ? 0.9 : 0.25), lineWidth: 1.2))
+                    .foregroundStyle(model.canSend ? Theme.neonAmber : Theme.textDim)
+            }
+            .buttonStyle(.plain)
+            .disabled(!model.canSend)
         }
     }
 
@@ -143,7 +199,7 @@ struct HeaderBar: View {
                     .font(.system(size: 22, weight: .black, design: .monospaced))
                     .foregroundStyle(Theme.textPrimary)
             }
-            Text("tunnel relay client")
+            Text("клиент релейного туннеля")
                 .font(Theme.monoSmall)
                 .foregroundStyle(Theme.textDim)
             Spacer()
