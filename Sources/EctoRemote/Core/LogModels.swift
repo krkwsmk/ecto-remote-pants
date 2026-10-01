@@ -5,7 +5,8 @@ enum LogKind {
     case info       // app-level status
     case command    // the exact command being run
     case control    // ncat/ssh control chatter (stderr)
-    case data       // actual stream payload
+    case data       // actual stream payload (received)
+    case sent       // command we sent to the device
     case error
 
     var color: Color {
@@ -14,6 +15,7 @@ enum LogKind {
         case .command: return Theme.neonPurple
         case .control: return Theme.textDim
         case .data: return Theme.neonGreen
+        case .sent: return Theme.neonAmber
         case .error: return Theme.neonRed
         }
     }
@@ -24,6 +26,7 @@ enum LogKind {
         case .command: return "CMD"
         case .control: return "NET"
         case .data: return "RX "
+        case .sent: return "TX "
         case .error: return "ERR"
         }
     }
