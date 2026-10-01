@@ -161,6 +161,20 @@ struct ContentView: View {
                 .background(RoundedRectangle(cornerRadius: 8).fill(Theme.bg))
                 .overlay(RoundedRectangle(cornerRadius: 8)
                     .stroke(Theme.neonAmber.opacity(model.canSend ? 0.5 : 0.2), lineWidth: 1))
+            Button { model.sendEnter() } label: {
+                Image(systemName: "return")
+                    .font(.system(size: 13, weight: .bold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 11)
+                    .background(RoundedRectangle(cornerRadius: 8)
+                        .fill(Theme.neonCyan.opacity(model.canSend ? 0.14 : 0.05)))
+                    .overlay(RoundedRectangle(cornerRadius: 8)
+                        .stroke(Theme.neonCyan.opacity(model.canSend ? 0.8 : 0.25), lineWidth: 1.2))
+                    .foregroundStyle(model.canSend ? Theme.neonCyan : Theme.textDim)
+            }
+            .buttonStyle(.plain)
+            .disabled(!model.canSend)
+            .help("Отправить Enter устройству")
             Button { model.sendCommand() } label: {
                 Text("SEND")
                     .font(.system(size: 12, weight: .heavy, design: .monospaced))
