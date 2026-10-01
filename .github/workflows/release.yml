@@ -1,0 +1,67 @@
+name: Build & Release macOS App
+
+on:
+  push:
+    branches:
+      - "claude/elegant-rubin-6px0x5"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 1.0.0)"
+        required: false
+        default: "1.0.0"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain info
+        run: |
+          swift --version
+          sw_vers
+
+      - name: Resolve version
+        id: ver
+        run: |
+          V="${{ github.event.inputs.version }}"
+          if [ -z "$V" ]; then V="1.0.0"; fi
+          echo "version=${V}" >> "$GITHUB_OUTPUT"
+          echo "build=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${V}.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and package app
+        id: build
+        run: |
+          chmod +x packaging/build_app.sh
+          ./packaging/build_app.sh "${{ steps.ver.outputs.version }}" "${{ steps.ver.outputs.build }}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EctoRemote-macOS
+          path: |
+            EctoRemote-macOS-*.zip
+            EctoRemote-macOS-*.dmg
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: Ecto Remote ${{ steps.ver.outputs.tag }}
+          body_path: packaging/RELEASE_NOTES.md
+          draft: false
+          prerelease: false
+          files: |
+            EctoRemote-macOS-*.zip
+            EctoRemote-macOS-*.dmg
