@@ -54,6 +54,7 @@ final class AppModel: ObservableObject {
     @Published var sshExtraArgs: String = AppSettings.shared.sshExtraArgs
     @Published var ncatTemplate: String = AppSettings.shared.ncatTemplate
     @Published var autoStartListener: Bool = AppSettings.shared.autoStartListener
+    @Published var lineEnding: String = AppSettings.shared.lineEnding  // "lf" | "cr" | "crlf"
 
     // Live state
     @Published private(set) var phase: ConnectionPhase = .idle
@@ -68,6 +69,15 @@ final class AppModel: ObservableObject {
 
     /// Whether a relay password has been configured (in Settings).
     var hasRelayPassword: Bool { !password.isEmpty }
+
+    /// The actual terminator bytes for the chosen line-ending mode.
+    private var terminator: String {
+        switch lineEnding {
+        case "cr": return "\r"
+        case "crlf": return "\r\n"
+        default: return "\n"
+        }
+    }
 
     // Processes
     private var sshProcess: Process?
@@ -140,23 +150,32 @@ final class AppModel: ObservableObject {
     }
 
     /// Send the typed command to the connected device via the listener's stdin.
+    /// An empty command sends just the line terminator (a bare Enter).
     func sendCommand() {
         let cmd = commandInput
-        guard !cmd.isEmpty else { return }
+        writeToDevice(cmd, display: cmd.isEmpty ? "⏎" : cmd)
+        commandInput = ""
+    }
+
+    /// Send a bare Enter (line terminator only) to the device.
+    func sendEnter() {
+        writeToDevice("", display: "⏎")
+    }
+
+    private func writeToDevice(_ text: String, display: String) {
         guard let handle = ncatStdin, phase == .listening else {
-            appendLine(.error, "Нет активного слушателя — команду отправить некуда.")
+            appendLine(.error, "Нет активного слушателя — отправлять некуда.")
             return
         }
-        guard let data = (cmd + "\n").data(using: .utf8) else { return }
+        guard let data = (text + terminator).data(using: .utf8) else { return }
         do {
             try handle.write(contentsOf: data)
         } catch {
-            appendLine(.error, "Не удалось отправить команду: \(error.localizedDescription)")
+            appendLine(.error, "Не удалось отправить: \(error.localizedDescription)")
             return
         }
-        appendLine(.sent, cmd)
-        logFiles.appendSession("[\(now())] TX \(cmd)")
-        commandInput = ""
+        appendLine(.sent, display)
+        logFiles.appendSession("[\(now())] TX \(display)")
     }
 
     func persistSettings() {
@@ -167,6 +186,7 @@ final class AppModel: ObservableObject {
         s.sshExtraArgs = sshExtraArgs
         s.ncatTemplate = ncatTemplate
         s.autoStartListener = autoStartListener
+        s.lineEnding = lineEnding
         if savePasswordEnabled {
             s.savePassword(password)
         } else {
