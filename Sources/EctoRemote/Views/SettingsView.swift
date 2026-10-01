@@ -6,52 +6,61 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("CONFIGURATION")
+                Text("НАСТРОЙКИ")
                     .font(.system(size: 13, weight: .black, design: .monospaced))
                     .tracking(3)
                     .foregroundStyle(Theme.titleGradient)
 
-                NeonPanel(accent: Theme.neonCyan, title: "Relay") {
+                NeonPanel(accent: Theme.neonCyan, title: "Релей") {
                     VStack(alignment: .leading, spacing: 10) {
-                        label("SSH USER")
+                        label("ПОЛЬЗОВАТЕЛЬ SSH")
                         NeonTextField(placeholder: "debug", text: $model.sshUser)
-                        label("SSH HOST")
+                        label("ХОСТ SSH (IP)")
                         NeonTextField(placeholder: "176.53.160.131", text: $model.sshHost)
-                        label("EXTRA SSH ARGS (optional)")
+                        label("ПАРОЛЬ РЕЛЕЯ")
+                        NeonSecureField(placeholder: "••••••••", text: $model.password)
+                        Toggle(isOn: $model.savePasswordEnabled) {
+                            Text("Запоминать пароль (Keychain)")
+                                .font(Theme.monoSmall)
+                                .foregroundStyle(Theme.textDim)
+                        }
+                        .toggleStyle(.switch)
+                        .tint(Theme.neonMagenta)
+                        label("ДОП. АРГУМЕНТЫ SSH (необязательно)")
                         NeonTextField(placeholder: "-o Option=value", text: $model.sshExtraArgs)
-                        Text("Changing the user or host switches to that relay's saved password.")
+                        Text("Пароль хранится в Keychain, отдельно для каждого user@host.")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(Theme.textDim)
                     }
                 }
 
-                NeonPanel(accent: Theme.neonGreen, title: "Listener") {
+                NeonPanel(accent: Theme.neonGreen, title: "Слушатель") {
                     VStack(alignment: .leading, spacing: 10) {
-                        label("LISTENER COMMAND  ({PORT} is substituted)")
+                        label("КОМАНДА СЛУШАТЕЛЯ  ({PORT} подставляется)")
                         NeonTextField(placeholder: "ncat -lvkp {PORT}", text: $model.ncatTemplate, accent: Theme.neonGreen)
                         Toggle(isOn: $model.autoStartListener) {
-                            Text("Start listener automatically once the tunnel is up")
+                            Text("Запускать слушатель автоматически после поднятия туннеля")
                                 .font(Theme.monoSmall)
                                 .foregroundStyle(Theme.textDim)
                         }
                         .toggleStyle(.switch)
                         .tint(Theme.neonGreen)
-                        Text("Requires ncat (install with: brew install nmap). You may substitute another listener, e.g. nc -lk {PORT}.")
+                        Text("Нужен ncat (установка: brew install nmap). Можно заменить на другой, напр. nc -lk {PORT}.")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(Theme.textDim)
                     }
                 }
 
-                NeonPanel(accent: Theme.neonPurple, title: "Storage") {
+                NeonPanel(accent: Theme.neonPurple, title: "Хранилище") {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Logs folder:")
+                        Text("Папка логов:")
                             .font(Theme.monoSmall)
                             .foregroundStyle(Theme.textDim)
                         Text(model.logsFolderURL.path)
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(Theme.textPrimary)
                             .textSelection(.enabled)
-                        NeonButton(title: "Open Logs Folder", accent: Theme.neonPurple,
+                        NeonButton(title: "Открыть папку логов", accent: Theme.neonPurple,
                                    systemImage: "folder.fill") {
                             model.revealLogsInFinder()
                         }
@@ -60,10 +69,10 @@ struct SettingsView: View {
 
                 HStack {
                     Spacer()
-                    NeonButton(title: "Save", accent: Theme.neonCyan, systemImage: "checkmark.seal.fill") {
+                    NeonButton(title: "Сохранить", accent: Theme.neonCyan, systemImage: "checkmark.seal.fill") {
                         model.persistSettings()
                     }
-                    .frame(width: 160)
+                    .frame(width: 180)
                 }
             }
             .padding(22)
