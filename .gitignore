@@ -1,0 +1,12 @@
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+EctoRemote.app/
+AppIcon.iconset/
+dmg_staging/
+icon.png
+*.zip
+*.dmg
+.DS_Store
