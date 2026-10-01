@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
+    @State private var savedFlash = false
 
     var body: some View {
         ScrollView {
@@ -20,7 +21,7 @@ struct SettingsView: View {
                         label("ПАРОЛЬ РЕЛЕЯ")
                         NeonSecureField(placeholder: "••••••••", text: $model.password)
                         Toggle(isOn: $model.savePasswordEnabled) {
-                            Text("Запоминать пароль (Keychain)")
+                            Text("Запоминать пароль")
                                 .font(Theme.monoSmall)
                                 .foregroundStyle(Theme.textDim)
                         }
@@ -28,7 +29,7 @@ struct SettingsView: View {
                         .tint(Theme.neonMagenta)
                         label("ДОП. АРГУМЕНТЫ SSH (необязательно)")
                         NeonTextField(placeholder: "-o Option=value", text: $model.sshExtraArgs)
-                        Text("Пароль хранится в Keychain, отдельно для каждого user@host.")
+                        Text("Пароль хранится в настройках приложения, отдельно для каждого user@host.")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(Theme.textDim)
                     }
@@ -46,6 +47,18 @@ struct SettingsView: View {
                         .toggleStyle(.switch)
                         .tint(Theme.neonGreen)
                         Text("Нужен ncat (установка: brew install nmap). Можно заменить на другой, напр. nc -lk {PORT}.")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(Theme.textDim)
+
+                        label("ПЕРЕВОД СТРОКИ ДЛЯ КОМАНД")
+                        Picker("", selection: $model.lineEnding) {
+                            Text("LF (\\n)").tag("lf")
+                            Text("CR (\\r)").tag("cr")
+                            Text("CRLF").tag("crlf")
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        Text("Чем заканчивать команды и Enter. Для терминальных устройств часто нужен CR.")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(Theme.textDim)
                     }
@@ -67,10 +80,23 @@ struct SettingsView: View {
                     }
                 }
 
-                HStack {
+                HStack(spacing: 12) {
+                    if savedFlash {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.circle.fill")
+                            Text("Сохранено")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        }
+                        .foregroundStyle(Theme.neonGreen)
+                        .transition(.opacity)
+                    }
                     Spacer()
                     NeonButton(title: "Сохранить", accent: Theme.neonCyan, systemImage: "checkmark.seal.fill") {
                         model.persistSettings()
+                        withAnimation { savedFlash = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            withAnimation { savedFlash = false }
+                        }
                     }
                     .frame(width: 180)
                 }
