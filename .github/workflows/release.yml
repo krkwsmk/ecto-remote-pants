@@ -1,4 +1,4 @@
-name: Build & Release macOS App
+name: Build & Release (macOS, Windows, Linux)
 
 on:
   push:
@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-macos:
     runs-on: macos-14
     steps:
       - name: Checkout
@@ -40,21 +40,11 @@ jobs:
           echo "tag=v${V}.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
       - name: Build and package app
-        id: build
         run: |
           chmod +x packaging/build_app.sh
           ./packaging/build_app.sh "${{ steps.ver.outputs.version }}" "${{ steps.ver.outputs.build }}"
 
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: EctoRemote-macOS
-          path: |
-            EctoRemote-macOS-*.zip
-            EctoRemote-macOS-*.dmg
-          if-no-files-found: error
-
-      - name: Publish GitHub Release
+      - name: Publish GitHub Release (macOS assets)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
@@ -65,3 +55,64 @@ jobs:
           files: |
             EctoRemote-macOS-*.zip
             EctoRemote-macOS-*.dmg
+
+  build-windows:
+    needs: build-macos
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        working-directory: electron
+        run: npm install
+
+      - name: Build Windows app
+        working-directory: electron
+        run: npx electron-builder --win --publish never
+
+      - name: Publish GitHub Release (Windows asset)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.event.inputs.version || '1.0.0' }}.${{ github.run_number }}
+          name: Ecto Remote v${{ github.event.inputs.version || '1.0.0' }}.${{ github.run_number }}
+          draft: false
+          prerelease: false
+          files: |
+            electron/dist/*.exe
+
+  build-linux:
+    needs: build-macos
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        working-directory: electron
+        run: npm install
+
+      - name: Build Linux app
+        working-directory: electron
+        run: npx electron-builder --linux --publish never
+
+      - name: Publish GitHub Release (Linux assets)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.event.inputs.version || '1.0.0' }}.${{ github.run_number }}
+          name: Ecto Remote v${{ github.event.inputs.version || '1.0.0' }}.${{ github.run_number }}
+          draft: false
+          prerelease: false
+          files: |
+            electron/dist/*.AppImage
+            electron/dist/*.deb
