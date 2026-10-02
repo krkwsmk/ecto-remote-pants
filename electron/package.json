@@ -5,6 +5,7 @@
   "description": "Cyberpunk reverse SSH tunnel relay client",
   "main": "main.js",
   "author": "Ecto Remote <ecto@ectoremote.app>",
+  "homepage": "https://github.com/krkwsmk/ecto-remote-pants",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
