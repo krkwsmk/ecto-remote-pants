@@ -1,0 +1,50 @@
+{
+  "name": "ecto-remote",
+  "productName": "Ecto Remote",
+  "version": "1.0.0",
+  "description": "Cyberpunk reverse SSH tunnel relay client",
+  "main": "main.js",
+  "author": "Ecto Remote <ecto@ectoremote.app>",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "dependencies": {
+    "ssh2": "^1.15.0"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.ectoremote.app",
+    "productName": "Ecto Remote",
+    "npmRebuild": false,
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "artifactName": "EctoRemote-${os}-${version}-${arch}.${ext}",
+    "win": {
+      "target": [
+        "portable"
+      ]
+    },
+    "portable": {
+      "artifactName": "EctoRemote-Windows-${version}.exe"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility",
+      "maintainer": "Ecto Remote <ecto@ectoremote.app>"
+    }
+  }
+}
