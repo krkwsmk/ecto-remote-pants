@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ecto Remote</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="scanlines"></div>
+
+  <header class="header">
+    <div class="brand">
+      <span class="brand-ecto">ECTO</span><span class="brand-rem">//REMOTE</span>
+    </div>
+    <div class="subtitle">клиент релейного туннеля</div>
+    <div class="spacer"></div>
+    <div id="statusPill" class="pill idle">
+      <span class="dot"></span><span id="statusLabel">ОФФЛАЙН</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="col-left">
+      <div class="panel" data-accent="cyan">
+        <div class="panel-title cyan">УПРАВЛЕНИЕ</div>
+        <label class="field-label">ПОРТ</label>
+        <input id="port" class="nf" type="text" placeholder="напр. 9000" />
+        <div id="noPwHint" class="hint amber" style="display:none">Пароль и релей задаются в Настройках.</div>
+        <button id="connectBtn" class="btn green">ПОДКЛЮЧИТЬ</button>
+        <button id="disconnectBtn" class="btn red" style="display:none">ОТКЛЮЧИТЬ</button>
+      </div>
+
+      <div class="panel" data-accent="magenta">
+        <div class="panel-title magenta">СОЕДИНЕНИЯ (<span id="connCount">0</span>)</div>
+        <div id="connEmpty" class="hint">Пока нет входящих соединений с данными.</div>
+        <div id="connList" class="conn-list"></div>
+      </div>
+
+      <div class="panel" data-accent="purple">
+        <div class="panel-title purple">ЛОГИ</div>
+        <button id="openLogsBtn" class="btn purple">ОТКРЫТЬ ПАПКУ ЛОГОВ</button>
+        <div class="row">
+          <button id="settingsBtn" class="btn cyan half">НАСТРОЙКИ</button>
+          <button id="clearBtn" class="btn dim half">ОЧИСТИТЬ</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="col-right">
+      <div class="stream-head">
+        <span class="stream-title">ПОТОК ДАННЫХ</span>
+        <span class="spacer"></span>
+        <span id="bytes" class="dim-text">0 байт</span>
+        <label class="switch-label"><input id="autoScroll" type="checkbox" checked /> автопрокрутка</label>
+      </div>
+      <div id="console" class="console"></div>
+      <div class="cmd-bar">
+        <span id="cmdChevron" class="chevron">&gt;</span>
+        <input id="cmdInput" class="cmd-input" type="text" placeholder="Нет активного соединения" disabled />
+        <button id="enterBtn" class="btn cyan icon" title="Отправить Enter устройству" disabled>⏎</button>
+        <button id="sendBtn" class="btn amber send" disabled>SEND</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- Settings modal -->
+  <div id="settingsOverlay" class="overlay" style="display:none">
+    <div class="modal">
+      <div class="modal-head">
+        <span class="modal-title cyan">НАСТРОЙКИ</span>
+        <span class="spacer"></span>
+        <button id="settingsSave" class="btn green small">СОХРАНИТЬ</button>
+        <button id="settingsClose" class="btn dim small">ЗАКРЫТЬ</button>
+      </div>
+      <div class="modal-body">
+        <div class="panel" data-accent="cyan">
+          <div class="panel-title cyan">РЕЛЕЙ</div>
+          <label class="field-label">ПОЛЬЗОВАТЕЛЬ SSH</label>
+          <input id="sshUser" class="nf" type="text" placeholder="debug" />
+          <label class="field-label">ХОСТ SSH (IP)</label>
+          <input id="sshHost" class="nf" type="text" placeholder="176.53.160.131" />
+          <label class="field-label">ПАРОЛЬ РЕЛЕЯ</label>
+          <input id="sshPassword" class="nf" type="password" placeholder="••••••••" />
+          <label class="switch-label dim"><input id="savePassword" type="checkbox" /> Запоминать пароль</label>
+          <div class="hint">Пароль хранится в настройках приложения, отдельно для каждого user@host.</div>
+        </div>
+
+        <div class="panel" data-accent="green">
+          <div class="panel-title green">КОМАНДЫ</div>
+          <label class="field-label">ПЕРЕВОД СТРОКИ ДЛЯ КОМАНД</label>
+          <div class="seg">
+            <button class="seg-btn" data-le="lf">LF (\n)</button>
+            <button class="seg-btn" data-le="cr">CR (\r)</button>
+            <button class="seg-btn" data-le="crlf">CRLF</button>
+          </div>
+          <div class="hint">Чем заканчивать команды и Enter. Для терминальных устройств часто нужен CR.</div>
+        </div>
+
+        <div class="panel" data-accent="purple">
+          <div class="panel-title purple">ХРАНИЛИЩЕ</div>
+          <div class="hint">Папка логов:</div>
+          <div id="logsPathText" class="path-text"></div>
+          <button id="openLogsBtn2" class="btn purple">ОТКРЫТЬ ПАПКУ ЛОГОВ</button>
+        </div>
+
+        <div id="savedFlash" class="saved-flash" style="display:none">✓ Сохранено</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
