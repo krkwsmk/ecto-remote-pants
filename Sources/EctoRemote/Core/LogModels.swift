@@ -4,7 +4,7 @@ import SwiftUI
 enum LogKind {
     case info       // app-level status
     case command    // the exact command being run
-    case control    // ncat/ssh control chatter (stderr)
+    case control    // ssh/listener control chatter
     case data       // actual stream payload (received)
     case sent       // command we sent to the device
     case error
@@ -38,9 +38,7 @@ struct LogLine: Identifiable {
     let kind: LogKind
     let text: String
 
-    var timeString: String {
-        LogLine.formatter.string(from: timestamp)
-    }
+    var timeString: String { LogLine.formatter.string(from: timestamp) }
 
     private static let formatter: DateFormatter = {
         let f = DateFormatter()
@@ -49,17 +47,21 @@ struct LogLine: Identifiable {
     }()
 }
 
-/// Metadata describing a single inbound connection and its log file.
+enum ConnStatus: Equatable { case active, closed }
+
+/// Metadata describing a single inbound device connection and its log file.
 struct ConnectionRecord: Identifiable {
     let id = UUID()
+    let number: Int
     let peer: String
     let startedAt: Date
     var bytes: Int
-    let fileURL: URL
+    var status: ConnStatus
+    var fileURL: URL?
 
     var startedString: String {
         let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        f.dateFormat = "HH:mm:ss"
         return f.string(from: startedAt)
     }
 }
