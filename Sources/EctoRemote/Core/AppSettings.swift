@@ -17,10 +17,10 @@ final class AppSettings {
         static let keychainAccount = "keychain.account"
         static let autoStartListener = "auto.startListener"
         static let lineEnding = "cmd.lineEnding"
+        static let autoReconnect = "auto.reconnect"
     }
 
-    /// Account name used to scope the saved password. Derived from user@host
-    /// so different relays keep different saved passwords.
+    /// The account name used to scope the saved password (user@host).
     var keychainAccount: String {
         "\(sshUser)@\(sshHost)"
     }
@@ -41,7 +41,7 @@ final class AppSettings {
         set { defaults.set(newValue, forKey: Key.sshExtraArgs) }
     }
 
-    /// Command template for the listener. `{PORT}` is substituted at runtime.
+    /// Legacy ncat listener template (unused by the native listener).
     var ncatTemplate: String {
         get { defaults.string(forKey: Key.ncatTemplate) ?? "ncat -lvkp {PORT}" }
         set { defaults.set(newValue, forKey: Key.ncatTemplate) }
@@ -52,7 +52,7 @@ final class AppSettings {
         set { defaults.set(newValue, forKey: Key.lastPort) }
     }
 
-    /// When true, the listener starts automatically once the tunnel is up.
+    /// Legacy flag (unused by the native listener).
     var autoStartListener: Bool {
         get { defaults.object(forKey: Key.autoStartListener) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.autoStartListener) }
@@ -62,6 +62,12 @@ final class AppSettings {
     var lineEnding: String {
         get { defaults.string(forKey: Key.lineEnding) ?? "lf" }
         set { defaults.set(newValue, forKey: Key.lineEnding) }
+    }
+
+    /// Whether the ssh tunnel reconnects automatically after an unexpected drop.
+    var autoReconnect: Bool {
+        get { defaults.object(forKey: Key.autoReconnect) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.autoReconnect) }
     }
 
     // Password is stored in the app's own preferences (not the macOS Keychain).
