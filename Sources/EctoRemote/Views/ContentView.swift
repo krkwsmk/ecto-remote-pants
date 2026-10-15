@@ -4,7 +4,6 @@ import AppKit
 struct ContentView: View {
     @EnvironmentObject var model: AppModel
     @State private var showingSettings = false
-    @State private var hostWindow: NSWindow?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,10 +19,6 @@ struct ContentView: View {
             }
         }
         .background(Theme.bg.ignoresSafeArea())
-        .background(WindowAccessor { win in
-            hostWindow = win
-            win?.isMovableByWindowBackground = true
-        })
         .sheet(isPresented: $showingSettings) { settingsSheet }
     }
 
@@ -48,11 +43,6 @@ struct ContentView: View {
         .padding(.horizontal, 18).padding(.vertical, 12)
         .frame(maxWidth: .infinity)
         .background(Theme.panel)
-        .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            if let w = hostWindow { w.zoom(nil) }
-            else { NSApp.keyWindow?.zoom(nil) }
-        }
     }
 
     private var tabStrip: some View {
@@ -102,22 +92,6 @@ struct ContentView: View {
         }
         .frame(width: 520, height: 640)
         .background(Theme.bg)
-    }
-}
-
-/// Resolves the hosting NSWindow so SwiftUI code can drive native window
-/// actions (e.g. zoom/maximize on a double-click of the custom header).
-struct WindowAccessor: NSViewRepresentable {
-    let onResolve: (NSWindow?) -> Void
-
-    func makeNSView(context: Context) -> NSView {
-        let v = NSView()
-        DispatchQueue.main.async { [weak v] in onResolve(v?.window) }
-        return v
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async { [weak nsView] in onResolve(nsView?.window) }
     }
 }
 
