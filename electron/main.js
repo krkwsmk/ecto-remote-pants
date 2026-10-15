@@ -6,47 +6,28 @@ const fs = require('fs');
 const { Client } = require('ssh2');
 
 let win = null;
+const sessions = new Map(); // sid -> Session
 
-// Live state
-let conn = null;
-let phase = 'idle';            // idle | connecting | listening | failed
-let activeStream = null;       // most recent device stream (for sending)
-let totalBytes = 0;
-let connectionIndex = 0;
-
-// Logging
-let sessionDir = null;
-let sessionLog = null;         // fs write stream for session.log
+const RECONNECT_DELAY_MS = 3000;
+const MAX_RETRIES = 5;
 
 // ---------------------------------------------------------------------------
-// Settings (stored in userData/settings.json)
+// Helpers
 // ---------------------------------------------------------------------------
 
-function settingsFile() {
-  return path.join(app.getPath('userData'), 'settings.json');
+function send(channel, payload) {
+  if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
 
-function loadSettings() {
-  try {
-    return JSON.parse(fs.readFileSync(settingsFile(), 'utf8'));
-  } catch {
-    return {};
-  }
-}
-
+function settingsFile() { return path.join(app.getPath('userData'), 'settings.json'); }
+function loadSettings() { try { return JSON.parse(fs.readFileSync(settingsFile(), 'utf8')); } catch { return {}; } }
 function saveSettings(s) {
   try {
     fs.mkdirSync(app.getPath('userData'), { recursive: true });
     fs.writeFileSync(settingsFile(), JSON.stringify(s || {}, null, 2));
     return true;
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
-
-// ---------------------------------------------------------------------------
-// Logs
-// ---------------------------------------------------------------------------
 
 function logsRoot() {
   const d = path.join(app.getPath('userData'), 'logs');
@@ -60,51 +41,14 @@ function stamp() {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
-function nowString() {
-  return new Date().toISOString().replace('T', ' ').replace('Z', '');
-}
+function nowString() { return new Date().toISOString().replace('T', ' ').replace('Z', ''); }
 
-function sanitizePeer(s) {
-  return (s || 'peer').replace(/[^A-Za-z0-9.\-_]/g, '_');
-}
+function sanitizePeer(s) { return (s || 'peer').replace(/[^A-Za-z0-9.\-_]/g, '_'); }
 
-function startSession(port) {
-  const dir = path.join(logsRoot(), `session_${port}_${stamp()}`);
-  fs.mkdirSync(dir, { recursive: true });
-  sessionDir = dir;
-  connectionIndex = 0;
-  try {
-    sessionLog = fs.createWriteStream(path.join(dir, 'session.log'), { flags: 'a' });
-  } catch {
-    sessionLog = null;
-  }
-  return dir;
-}
-
-function appendSession(line) {
-  try { if (sessionLog) sessionLog.write(`[${nowString()}] ${line}\n`); } catch {}
-}
-
-function closeSession() {
-  try { if (sessionLog) sessionLog.end(); } catch {}
-  sessionLog = null;
-}
-
-// ---------------------------------------------------------------------------
-// Renderer messaging
-// ---------------------------------------------------------------------------
-
-function send(channel, payload) {
-  if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
-}
-
-function setPhase(p) {
-  phase = p;
-  send('phase', p);
-}
-
-function pushLine(kind, text) {
-  send('log', { kind, text, ts: Date.now() });
+function terminatorFor(mode) {
+  if (mode === 'cr') return '\r';
+  if (mode === 'crlf') return '\r\n';
+  return '\n';
 }
 
 function sanitizeForDisplay(s) {
@@ -118,195 +62,311 @@ function sanitizeForDisplay(s) {
 }
 
 // ---------------------------------------------------------------------------
-// SSH tunnel
+// Session: one tab = one reverse tunnel
 // ---------------------------------------------------------------------------
 
-function terminatorFor(mode) {
-  if (mode === 'cr') return '\r';
-  if (mode === 'crlf') return '\r\n';
-  return '\n';
-}
-
-let lineEndingMode = 'lf';
-
-function doConnect(cfg) {
-  if (phase === 'connecting' || phase === 'listening') return;
-
-  const port = parseInt(String(cfg.port || '').trim(), 10);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    pushLine('error', 'Неверный порт. Введите число от 1 до 65535.');
-    return;
-  }
-  const host = (cfg.host || '').trim();
-  const user = (cfg.user || '').trim();
-  const password = cfg.password || '';
-  lineEndingMode = cfg.lineEnding || 'lf';
-
-  if (!host || !user) {
-    pushLine('error', 'Укажите пользователя и хост релея в Настройках.');
-    return;
+class Session {
+  constructor(sid) {
+    this.id = sid;
+    this.conn = null;
+    this.phase = 'idle';           // idle | connecting | reconnecting | listening | failed
+    this.streams = new Map();      // connId -> stream
+    this.connCounter = 0;
+    this.totalBytes = 0;
+    this.sessionDir = null;
+    this.sessionLog = null;
+    this.lineEnding = 'lf';
+    this.activeConnId = null;
+    this.userClosed = false;
+    this.cfg = null;
+    this.retries = 0;
+    this.reconnectTimer = null;
   }
 
-  totalBytes = 0;
-  activeStream = null;
-  send('bytes', 0);
-  send('reset-connections');
+  log(kind, text) { send('log', { sid: this.id, kind, text, ts: Date.now() }); }
+  setPhase(p) { this.phase = p; send('phase', { sid: this.id, phase: p }); }
+  appendSession(line) { try { if (this.sessionLog) this.sessionLog.write(`[${nowString()}] ${line}\n`); } catch {} }
 
-  const dir = startSession(String(port));
-  pushLine('info', `Лог сессии: ${dir}`);
-  appendSession('SYS session start');
+  startLog(port) {
+    const dir = path.join(logsRoot(), `session_${port}_${stamp()}`);
+    fs.mkdirSync(dir, { recursive: true });
+    this.sessionDir = dir;
+    try { this.sessionLog = fs.createWriteStream(path.join(dir, 'session.log'), { flags: 'a' }); } catch { this.sessionLog = null; }
+    return dir;
+  }
+  closeLog() { try { if (this.sessionLog) this.sessionLog.end(); } catch {} this.sessionLog = null; }
 
-  setPhase('connecting');
-  pushLine('info', `Подключаюсь к ${user}@${host}…`);
+  // --- connect / disconnect ---
 
-  conn = new Client();
+  connect(cfg, isRetry = false) {
+    if (this.phase === 'connecting' || this.phase === 'listening') return;
 
-  conn.on('ready', () => {
-    pushLine('info', 'Аутентификация успешна. Запрашиваю обратный туннель…');
-    appendSession('SYS ssh authenticated');
-    conn.forwardIn('', port, (err) => {
-      if (err) {
-        pushLine('error', `Релей отклонил проброс порта ${port}: ${err.message}`);
-        appendSession('ERR forwardIn failed: ' + err.message);
-        failConnection();
+    const port = parseInt(String(cfg.port || '').trim(), 10);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      this.log('error', 'Неверный порт. Введите число от 1 до 65535.');
+      return;
+    }
+    const host = (cfg.host || '').trim();
+    const user = (cfg.user || '').trim();
+    if (!host || !user) {
+      this.log('error', 'Укажите пользователя и хост релея в Настройках.');
+      return;
+    }
+
+    this.cfg = cfg;
+    this.lineEnding = cfg.lineEnding || 'lf';
+    this.userClosed = false;
+    this.portNum = port;
+
+    if (!isRetry) {
+      this.retries = 0;
+      this.totalBytes = 0;
+      send('bytes', { sid: this.id, bytes: 0 });
+      send('reset-connections', { sid: this.id });
+      const dir = this.startLog(String(port));
+      this.log('info', `Лог сессии: ${dir}`);
+      this.appendSession('SYS session start');
+    }
+
+    this.setPhase(isRetry ? 'reconnecting' : 'connecting');
+    this.log('info', isRetry
+      ? `Переподключение к ${user}@${host} (попытка ${this.retries})…`
+      : `Подключаюсь к ${user}@${host}…`);
+
+    const conn = new Client();
+    this.conn = conn;
+
+    conn.on('ready', () => {
+      this.retries = 0;
+      this.log('info', 'Аутентификация успешна. Запрашиваю обратный туннель…');
+      this.appendSession('SYS ssh authenticated');
+      conn.forwardIn('', port, (err) => {
+        if (err) {
+          this.log('error', `Релей отклонил проброс порта ${port}: ${err.message}`);
+          this.appendSession('ERR forwardIn failed: ' + err.message);
+          this.fail(true);
+          return;
+        }
+        this.setPhase('listening');
+        this.log('info', `Туннель активен на порту ${port}. Жду подключения устройства…`);
+        this.appendSession(`SYS tunnel up on port ${port}`);
+      });
+    });
+
+    conn.on('tcp connection', (info, accept) => { this.handleDeviceConnection(info, accept); });
+
+    conn.on('error', (err) => {
+      let msg = err && err.message ? err.message : String(err);
+      if (/All configured authentication methods failed/i.test(msg)) {
+        msg = 'Аутентификация не удалась. Проверьте пароль/логин в Настройках.';
+        this.log('error', `SSH ошибка: ${msg}`);
+        this.appendSession('ERR ' + msg);
+        this.fail(false); // do not retry bad auth
         return;
       }
-      setPhase('listening');
-      pushLine('info', `Туннель активен на порту ${port}. Жду подключения устройства…`);
-      appendSession(`SYS tunnel up on port ${port}`);
+      this.log('error', `SSH ошибка: ${msg}`);
+      this.appendSession('ERR ' + msg);
+      this.fail(true);
     });
-  });
 
-  conn.on('tcp connection', (info, accept) => {
-    handleDeviceConnection(info, accept);
-  });
+    conn.on('close', () => {
+      this.conn = null;
+      // Mark any still-open connections as closed in the UI.
+      this.closeAllStreams('tunnel');
+      if (this.userClosed) {
+        this.setPhase('idle');
+        return;
+      }
+      if (this.phase === 'listening' || this.phase === 'connecting' || this.phase === 'reconnecting') {
+        this.scheduleReconnect();
+      }
+    });
 
-  conn.on('error', (err) => {
-    let msg = err && err.message ? err.message : String(err);
-    if (err && /All configured authentication methods failed/i.test(msg)) {
-      msg = 'Аутентификация не удалась. Проверьте пароль/логин в Настройках.';
+    try {
+      conn.connect({
+        host, port: 22, username: user, password: cfg.password || '',
+        readyTimeout: 20000, keepaliveInterval: 15000, keepaliveCountMax: 4
+      });
+    } catch (e) {
+      this.log('error', 'Не удалось начать подключение: ' + (e && e.message));
+      this.fail(true);
     }
-    pushLine('error', `SSH ошибка: ${msg}`);
-    appendSession('ERR ' + msg);
-    failConnection();
-  });
+  }
 
-  conn.on('close', () => {
-    if (phase !== 'idle' && phase !== 'failed') {
-      pushLine('info', 'Соединение закрыто.');
-      appendSession('SYS connection closed');
-      setPhase('idle');
+  scheduleReconnect() {
+    if (this.userClosed) { this.setPhase('idle'); return; }
+    if (this.retries >= MAX_RETRIES) {
+      this.log('error', `Туннель потерян. Исчерпаны попытки переподключения (${MAX_RETRIES}).`);
+      this.setPhase('failed');
+      this.closeLog();
+      return;
     }
-    conn = null;
-  });
+    this.retries += 1;
+    this.setPhase('reconnecting');
+    this.log('info', `Связь потеряна. Переподключение через ${RECONNECT_DELAY_MS / 1000} c…`);
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = setTimeout(() => {
+      if (this.userClosed || !this.cfg) return;
+      this.connect(this.cfg, true);
+    }, RECONNECT_DELAY_MS);
+  }
 
-  try {
-    conn.connect({
-      host,
-      port: 22,
-      username: user,
-      password,
-      readyTimeout: 20000,
-      keepaliveInterval: 15000,
-      keepaliveCountMax: 4
+  fail(allowRetry) {
+    try { if (this.conn) this.conn.end(); } catch {}
+    this.conn = null;
+    if (allowRetry && !this.userClosed) {
+      this.scheduleReconnect();
+    } else {
+      this.setPhase('failed');
+      this.closeLog();
+    }
+  }
+
+  disconnect() {
+    this.userClosed = true;
+    clearTimeout(this.reconnectTimer);
+    this.log('info', 'Отключение…');
+    this.appendSession('SYS session closed');
+    this.closeAllStreams('user');
+    try { if (this.conn) this.conn.end(); } catch {}
+    this.conn = null;
+    this.closeLog();
+    this.setPhase('idle');
+  }
+
+  dispose() {
+    this.userClosed = true;
+    clearTimeout(this.reconnectTimer);
+    this.closeAllStreams('user');
+    try { if (this.conn) this.conn.end(); } catch {}
+    this.conn = null;
+    this.closeLog();
+  }
+
+  // --- device connections ---
+
+  handleDeviceConnection(info, accept) {
+    const stream = accept();
+    this.connCounter += 1;
+    const connId = this.connCounter;
+    const peer = `${info.srcIP}:${info.srcPort}`;
+    this.streams.set(connId, stream);
+    this.activeConnId = connId;
+
+    const startedAt = nowString();
+    let file = null;
+    let filePath = null;
+    let bytes = 0;
+
+    const ensureFile = () => {
+      if (file) return;
+      const name = `connection_${String(connId).padStart(3, '0')}_${sanitizePeer(peer)}_${stamp()}.log`;
+      filePath = this.sessionDir ? path.join(this.sessionDir, name) : path.join(logsRoot(), name);
+      try { file = fs.createWriteStream(filePath, { flags: 'a' }); } catch {}
+      send('conn-file', { sid: this.id, id: connId, file: filePath });
+    };
+
+    send('conn-new', { sid: this.id, id: connId, peer, startedAt, status: 'active', bytes: 0, file: null });
+    this.log('control', `Подключение #${connId} от ${peer}`);
+    this.appendSession(`NET connection #${connId} from ${peer}`);
+
+    stream.on('data', (data) => {
+      ensureFile();
+      bytes += data.length;
+      try { if (file) file.write(data); } catch {}
+      this.totalBytes += data.length;
+      send('bytes', { sid: this.id, bytes: this.totalBytes });
+      send('conn-update', { sid: this.id, id: connId, bytes, status: 'active' });
+
+      const text = data.toString('utf8').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      const pieces = text.split('\n');
+      pieces.forEach((piece, i) => {
+        if (piece === '' && i === pieces.length - 1) return;
+        this.log('data', `#${connId} ${sanitizeForDisplay(piece)}`);
+      });
     });
-  } catch (e) {
-    pushLine('error', 'Не удалось начать подключение: ' + (e && e.message));
-    failConnection();
+
+    const done = (reason) => {
+      try { if (file) file.end(); } catch {}
+      this.streams.delete(connId);
+      if (this.activeConnId === connId) {
+        const remaining = [...this.streams.keys()];
+        this.activeConnId = remaining.length ? remaining[remaining.length - 1] : null;
+      }
+      send('conn-update', { sid: this.id, id: connId, bytes, status: 'closed' });
+      this.appendSession(`NET connection #${connId} closed (${bytes} B, ${reason || 'end'})`);
+    };
+    stream.on('close', () => done('end'));
+    stream.on('end', () => done('end'));
+    stream.on('error', () => done('error'));
+  }
+
+  closeConnection(connId) {
+    const stream = this.streams.get(connId);
+    if (!stream) return;
+    this.log('info', `Обрываю соединение #${connId}…`);
+    try { stream.end(); } catch {}
+    try { stream.close(); } catch {}
+    try { stream.destroy(); } catch {}
+  }
+
+  closeAllStreams(reason) {
+    for (const [, stream] of this.streams) {
+      try { stream.end(); } catch {}
+      try { stream.close(); } catch {}
+      try { stream.destroy(); } catch {}
+    }
+    if (reason === 'user') this.streams.clear();
+  }
+
+  setActiveConnection(connId) {
+    if (this.streams.has(connId)) this.activeConnId = connId;
+  }
+
+  writeToDevice(text, display) {
+    if (this.phase !== 'listening' || this.activeConnId == null) {
+      this.log('error', 'Нет активного подключения устройства — отправлять некуда.');
+      return;
+    }
+    const stream = this.streams.get(this.activeConnId);
+    if (!stream) {
+      this.log('error', 'Выбранное соединение уже закрыто.');
+      return;
+    }
+    try {
+      stream.write(text + terminatorFor(this.lineEnding));
+    } catch (e) {
+      this.log('error', 'Не удалось отправить: ' + (e && e.message));
+      return;
+    }
+    this.log('sent', `#${this.activeConnId} ${display}`);
+    this.appendSession(`TX #${this.activeConnId} ${display}`);
   }
 }
 
-function handleDeviceConnection(info, accept) {
-  const stream = accept();
-  activeStream = stream;
-  const peer = `${info.srcIP}:${info.srcPort}`;
-  pushLine('control', `Подключение от ${peer}`);
-  appendSession(`NET connection from ${peer}`);
-
-  let rec = null; // lazily created on first byte so empty probes don't clutter
-
-  stream.on('data', (data) => {
-    if (!rec) rec = openConnectionRecord(peer);
-    rec.bytes += data.length;
-    try { rec.file.write(data); } catch {}
-    totalBytes += data.length;
-    send('bytes', totalBytes);
-    send('conn-update', { id: rec.id, bytes: rec.bytes });
-
-    const text = data.toString('utf8').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    const pieces = text.split('\n');
-    pieces.forEach((piece, i) => {
-      if (piece === '' && i === pieces.length - 1) return;
-      pushLine('data', sanitizeForDisplay(piece));
-    });
-  });
-
-  const done = () => {
-    try { if (rec && rec.file) rec.file.end(); } catch {}
-    if (activeStream === stream) activeStream = null;
-  };
-  stream.on('close', done);
-  stream.on('end', done);
-  stream.on('error', () => {});
-}
-
-function openConnectionRecord(peer) {
-  connectionIndex += 1;
-  const id = connectionIndex;
-  const name = `connection_${String(id).padStart(3, '0')}_${sanitizePeer(peer)}_${stamp()}.log`;
-  const filePath = sessionDir ? path.join(sessionDir, name) : path.join(logsRoot(), name);
-  let file = null;
-  try { file = fs.createWriteStream(filePath, { flags: 'a' }); } catch {}
-  const startedAt = nowString();
-  send('conn-new', { id, peer, bytes: 0, startedAt, file: filePath });
-  pushLine('info', `Соединение #${id}: ${peer} → ${name}`);
-  return { id, peer, bytes: 0, file, filePath };
-}
-
-function writeToDevice(text, display) {
-  if (phase !== 'listening' || !activeStream) {
-    pushLine('error', 'Нет активного подключения устройства — отправлять некуда.');
-    return;
-  }
-  try {
-    activeStream.write(text + terminatorFor(lineEndingMode));
-  } catch (e) {
-    pushLine('error', 'Не удалось отправить: ' + (e && e.message));
-    return;
-  }
-  pushLine('sent', display);
-  appendSession('TX ' + display);
-}
-
-function failConnection() {
-  try { if (conn) conn.end(); } catch {}
-  conn = null;
-  activeStream = null;
-  setPhase('failed');
-  closeSession();
-}
-
-function doDisconnect() {
-  pushLine('info', 'Отключение…');
-  appendSession('SYS session closed');
-  try { if (conn) conn.end(); } catch {}
-  conn = null;
-  activeStream = null;
-  closeSession();
-  setPhase('idle');
+function getSession(sid) {
+  let s = sessions.get(sid);
+  if (!s) { s = new Session(sid); sessions.set(sid, s); }
+  return s;
 }
 
 // ---------------------------------------------------------------------------
 // IPC
 // ---------------------------------------------------------------------------
 
-ipcMain.handle('connect', (_e, cfg) => { doConnect(cfg || {}); });
-ipcMain.handle('disconnect', () => { doDisconnect(); });
-ipcMain.handle('send', (_e, text) => {
+ipcMain.handle('connect', (_e, { sid, cfg }) => { getSession(sid).connect(cfg || {}); });
+ipcMain.handle('disconnect', (_e, { sid }) => { getSession(sid).disconnect(); });
+ipcMain.handle('send', (_e, { sid, text }) => {
   const t = String(text || '');
-  writeToDevice(t, t === '' ? '⏎' : t);
+  getSession(sid).writeToDevice(t, t === '' ? '⏎' : t);
 });
-ipcMain.handle('enter', () => { writeToDevice('', '⏎'); });
+ipcMain.handle('enter', (_e, { sid }) => { getSession(sid).writeToDevice('', '⏎'); });
+ipcMain.handle('closeConn', (_e, { sid, connId }) => { getSession(sid).closeConnection(connId); });
+ipcMain.handle('setActiveConn', (_e, { sid, connId }) => { getSession(sid).setActiveConnection(connId); });
+ipcMain.handle('closeSession', (_e, { sid }) => {
+  const s = sessions.get(sid);
+  if (s) { s.dispose(); sessions.delete(sid); }
+});
 ipcMain.handle('loadSettings', () => loadSettings());
 ipcMain.handle('saveSettings', (_e, s) => saveSettings(s));
 ipcMain.handle('logsPath', () => logsRoot());
@@ -322,10 +382,10 @@ ipcMain.handle('revealConn', (_e, p) => {
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 1040,
-    height: 680,
-    minWidth: 900,
-    minHeight: 600,
+    width: 1280,
+    height: 760,
+    minWidth: 820,
+    minHeight: 560,
     backgroundColor: '#05060B',
     title: 'Ecto Remote',
     webPreferences: {
@@ -341,8 +401,8 @@ function createWindow() {
 app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
-  try { if (conn) conn.end(); } catch {}
+  for (const [, s] of sessions) s.dispose();
   app.quit();
 });
 
-app.on('before-quit', () => { try { if (conn) conn.end(); } catch {} });
+app.on('before-quit', () => { for (const [, s] of sessions) s.dispose(); });
