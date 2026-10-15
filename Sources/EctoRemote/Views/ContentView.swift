@@ -41,6 +41,8 @@ struct ContentView: View {
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 18).padding(.vertical, 12)
+        .contentShape(Rectangle())
+        .background(WindowTitleBarBehavior())
         .background(Theme.panel)
     }
 
@@ -91,6 +93,30 @@ struct ContentView: View {
         }
         .frame(width: 520, height: 640)
         .background(Theme.bg)
+    }
+}
+
+/// Makes the custom header act like a native title bar: double-click zooms
+/// (maximizes) the window, and a single-click drag moves the window. Lives
+/// behind the header content, so buttons and text keep working; empty areas
+/// forward their clicks here.
+struct WindowTitleBarBehavior: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { TitleBarView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    final class TitleBarView: NSView {
+        override var mouseDownCanMoveWindow: Bool { false }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func mouseDown(with event: NSEvent) {
+            guard let window = window else { super.mouseDown(with: event); return }
+            if event.clickCount >= 2 {
+                // Match the system title-bar double-click action (zoom).
+                window.zoom(nil)
+            } else {
+                window.performDrag(with: event)
+            }
+        }
     }
 }
 
