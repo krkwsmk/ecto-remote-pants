@@ -74,6 +74,8 @@ jobs:
 
       - name: Build Windows app
         working-directory: electron
+        env:
+          BUILD_NO: ${{ github.run_number }}
         run: npx electron-builder --win --publish never
 
       - name: Publish GitHub Release (Windows asset)
@@ -104,6 +106,8 @@ jobs:
 
       - name: Build Linux app
         working-directory: electron
+        env:
+          BUILD_NO: ${{ github.run_number }}
         run: npx electron-builder --linux --publish never
 
       - name: Publish GitHub Release (Linux assets)

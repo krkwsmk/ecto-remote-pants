@@ -30,14 +30,14 @@
     "directories": {
       "output": "dist"
     },
-    "artifactName": "EctoRemote-${os}-${version}-${arch}.${ext}",
+    "artifactName": "EctoRemote-${os}-${version}.${env.BUILD_NO}-${arch}.${ext}",
     "win": {
       "target": [
         "portable"
       ]
     },
     "portable": {
-      "artifactName": "EctoRemote-Windows-${version}.exe"
+      "artifactName": "EctoRemote-Windows-${version}.${env.BUILD_NO}.exe"
     },
     "linux": {
       "target": [
