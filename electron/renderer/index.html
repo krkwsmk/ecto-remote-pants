@@ -18,7 +18,13 @@
     <div id="statusPill" class="pill idle">
       <span class="dot"></span><span id="statusLabel">ОФФЛАЙН</span>
     </div>
+    <button id="settingsBtn" class="hbtn" title="Настройки">⚙</button>
   </header>
+
+  <div class="tabbar" id="tabbar">
+    <div class="tabs" id="tabs"></div>
+    <button id="addTabBtn" class="tab-add" title="Новая вкладка">+</button>
+  </div>
 
   <main class="layout">
     <section class="col-left">
@@ -33,17 +39,14 @@
 
       <div class="panel" data-accent="magenta">
         <div class="panel-title magenta">СОЕДИНЕНИЯ (<span id="connCount">0</span>)</div>
-        <div id="connEmpty" class="hint">Пока нет входящих соединений с данными.</div>
+        <div id="connEmpty" class="hint">Нет подключений устройств.</div>
         <div id="connList" class="conn-list"></div>
       </div>
 
       <div class="panel" data-accent="purple">
         <div class="panel-title purple">ЛОГИ</div>
         <button id="openLogsBtn" class="btn purple">ОТКРЫТЬ ПАПКУ ЛОГОВ</button>
-        <div class="row">
-          <button id="settingsBtn" class="btn cyan half">НАСТРОЙКИ</button>
-          <button id="clearBtn" class="btn dim half">ОЧИСТИТЬ</button>
-        </div>
+        <button id="clearBtn" class="btn dim">ОЧИСТИТЬ ЭКРАН</button>
       </div>
     </section>
 
@@ -51,6 +54,7 @@
       <div class="stream-head">
         <span class="stream-title">ПОТОК ДАННЫХ</span>
         <span class="spacer"></span>
+        <span id="activeConn" class="dim-text"></span>
         <span id="bytes" class="dim-text">0 байт</span>
         <label class="switch-label"><input id="autoScroll" type="checkbox" checked /> автопрокрутка</label>
       </div>
@@ -83,7 +87,7 @@
           <label class="field-label">ПАРОЛЬ РЕЛЕЯ</label>
           <input id="sshPassword" class="nf" type="password" placeholder="••••••••" />
           <label class="switch-label dim"><input id="savePassword" type="checkbox" /> Запоминать пароль</label>
-          <div class="hint">Пароль хранится в настройках приложения, отдельно для каждого user@host.</div>
+          <div class="hint">Релей общий для всех вкладок. Порт указывается в каждой вкладке отдельно.</div>
         </div>
 
         <div class="panel" data-accent="green">
