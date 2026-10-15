@@ -6,6 +6,7 @@ set -euo pipefail
 
 VERSION="${1:-1.0.0}"
 BUILD="${2:-1}"
+FULLVER="${VERSION}.${BUILD}"
 APP="EctoRemote.app"
 
 echo "==> Building universal release binary (arm64 + x86_64)"
@@ -55,13 +56,13 @@ codesign --force --deep --sign - "$APP"
 codesign --verify --verbose=2 "$APP" || true
 
 echo "==> Packaging zip"
-ZIP="EctoRemote-macOS-${VERSION}.zip"
+ZIP="EctoRemote-macOS-${FULLVER}.zip"
 rm -f "$ZIP"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 echo "    created $ZIP"
 
 echo "==> Packaging dmg (best effort)"
-DMG="EctoRemote-macOS-${VERSION}.dmg"
+DMG="EctoRemote-macOS-${FULLVER}.dmg"
 rm -f "$DMG"
 STAGING="dmg_staging"
 rm -rf "$STAGING"

@@ -4,6 +4,7 @@ import AppKit
 struct ContentView: View {
     @EnvironmentObject var model: AppModel
     @State private var showingSettings = false
+    @State private var hostWindow: NSWindow?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,6 +20,10 @@ struct ContentView: View {
             }
         }
         .background(Theme.bg.ignoresSafeArea())
+        .background(WindowAccessor { win in
+            hostWindow = win
+            win?.isMovableByWindowBackground = true
+        })
         .sheet(isPresented: $showingSettings) { settingsSheet }
     }
 
@@ -41,9 +46,13 @@ struct ContentView: View {
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 18).padding(.vertical, 12)
-        .contentShape(Rectangle())
-        .background(WindowTitleBarBehavior())
+        .frame(maxWidth: .infinity)
         .background(Theme.panel)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            if let w = hostWindow { w.zoom(nil) }
+            else { NSApp.keyWindow?.zoom(nil) }
+        }
     }
 
     private var tabStrip: some View {
@@ -96,27 +105,19 @@ struct ContentView: View {
     }
 }
 
-/// Makes the custom header act like a native title bar: double-click zooms
-/// (maximizes) the window, and a single-click drag moves the window. Lives
-/// behind the header content, so buttons and text keep working; empty areas
-/// forward their clicks here.
-struct WindowTitleBarBehavior: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView { TitleBarView() }
-    func updateNSView(_ nsView: NSView, context: Context) {}
+/// Resolves the hosting NSWindow so SwiftUI code can drive native window
+/// actions (e.g. zoom/maximize on a double-click of the custom header).
+struct WindowAccessor: NSViewRepresentable {
+    let onResolve: (NSWindow?) -> Void
 
-    final class TitleBarView: NSView {
-        override var mouseDownCanMoveWindow: Bool { false }
-        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    func makeNSView(context: Context) -> NSView {
+        let v = NSView()
+        DispatchQueue.main.async { [weak v] in onResolve(v?.window) }
+        return v
+    }
 
-        override func mouseDown(with event: NSEvent) {
-            guard let window = window else { super.mouseDown(with: event); return }
-            if event.clickCount >= 2 {
-                // Match the system title-bar double-click action (zoom).
-                window.zoom(nil)
-            } else {
-                window.performDrag(with: event)
-            }
-        }
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { [weak nsView] in onResolve(nsView?.window) }
     }
 }
 
